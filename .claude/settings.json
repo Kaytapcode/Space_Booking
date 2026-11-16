@@ -1,0 +1,63 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(.\\backend\\mvnw.cmd *)",
+      "PowerShell(.\\mvnw.cmd *)",
+      "PowerShell(npm *)",
+      "PowerShell(npx *)",
+      "PowerShell(node *)",
+      "PowerShell(docker compose *)",
+      "PowerShell(docker build *)",
+      "PowerShell(docker run *)",
+      "PowerShell(docker ps *)",
+      "PowerShell(docker logs *)",
+      "PowerShell(docker stop *)",
+      "PowerShell(docker rm *)",
+      "PowerShell(git status *)",
+      "PowerShell(git diff *)",
+      "PowerShell(git log *)",
+      "PowerShell(git show *)",
+      "PowerShell(git rev-parse *)",
+      "PowerShell(git ls-files *)",
+      "PowerShell(git branch --show-current)",
+      "PowerShell(git add *)",
+      "PowerShell(git commit *)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(node *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ],
+    "deny": [
+      "PowerShell(git push *)",
+      "PowerShell(git reset --hard*)",
+      "PowerShell(git clean *)",
+      "PowerShell(Remove-Item -Recurse*)",
+      "PowerShell(Remove-Item *-Recurse*)",
+      "PowerShell(rm -rf *)",
+      "PowerShell(docker system prune*)",
+      "Bash(git push *)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean *)",
+      "Bash(rm -rf *)",
+      "Bash(docker system prune*)",
+      "Read(.env)",
+      "Read(.env.local)",
+      "Read(.env.production)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.js\"" }
+        ]
+      }
+    ]
+  }
+}

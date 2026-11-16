@@ -1,0 +1,12 @@
+package com.spacebooking.config;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+/** Tests set `app.scheduler.enabled=false` and call `BookingScheduler.run()` directly, so no background run races them. */
+@Configuration
+@EnableScheduling
+@ConditionalOnProperty(name = "app.scheduler.enabled", havingValue = "true", matchIfMissing = true)
+public class SchedulingConfig {
+}

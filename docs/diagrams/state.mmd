@@ -1,0 +1,20 @@
+%% Generated from docs/contract/domain.md section 4
+stateDiagram-v2
+    [*] --> PENDING : create [EMPLOYEE and room.requiresApproval]
+    [*] --> CONFIRMED : create [MANAGER, or room without approval]
+
+    PENDING --> CONFIRMED : approve (MANAGER) [now < start]
+    PENDING --> CANCELLED : reject (MANAGER, reason) [now < start]
+    PENDING --> CANCELLED : cancel (owner) [now < start]
+    PENDING --> CANCELLED : expire (SYSTEM_SCHEDULER) [now >= start]
+
+    CONFIRMED --> CHECKED_IN : check-in (owner) [start-15m <= now <= start+15m]
+    CONFIRMED --> CANCELLED : cancel (owner) [now < start]
+    CONFIRMED --> NO_SHOW : mark no-show (SYSTEM_SCHEDULER) [now > start+15m]
+
+    CHECKED_IN --> COMPLETED : checkout (owner) / end_time shortened
+    CHECKED_IN --> COMPLETED : complete (SYSTEM_SCHEDULER) [now >= end]
+
+    CANCELLED --> [*]
+    NO_SHOW --> [*]
+    COMPLETED --> [*]

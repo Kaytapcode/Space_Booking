@@ -1,0 +1,1533 @@
+# SpaceBooking API contract (frozen after GATE 1). Error responses are declared per operation; ErrorCode holds the catalog.
+openapi: 3.1.0
+info:
+  title: SpaceBooking API
+  version: 1.0.0
+  summary: Internal meeting-room booking by time slot without conflicts.
+  description: |
+    Frozen contract. Business rules live in `domain.md`; this file defines shapes and status codes.
+    - Every operation lists its allowed roles in `x-roles` (`PUBLIC` = no token).
+    - Times are ISO-8601 `date-time`. Requests may carry any offset; responses are UTC (`Z`).
+      Booking times must be whole minutes (seconds and fractions = 0).
+    - Errors are RFC 7807 `application/problem+json` with a stable `code` from `ErrorCode`.
+    - Check order: 401 -> 403 (role) -> 400 (request shape, incl. malformed path UUIDs) -> 404 -> 403 (ownership) -> 409/400 (state and business guards).
+    - Every operation declares each status it can return, with one example per error `code`. Malformed JSON, wrong types and missing parameters are 400 `VALIDATION_FAILED`.
+    - Outside the operations: unknown route (404), wrong method (405) and unsupported media type (415) return a ProblemDetail with `REQUEST_NOT_SUPPORTED`.
+    - Public operations (`security: []`) ignore any `Authorization` header.
+    - List sort orders and tie-breakers: domain.md section 10.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: /
+    description: Same origin
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Registration, login and current user.
+  - name: Rooms
+    description: Room catalog and search.
+  - name: Bookings
+    description: Booking lifecycle and schedules.
+  - name: Audit
+    description: Audit trail.
+paths:
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Register a new EMPLOYEE account and log in
+      x-roles: [PUBLIC]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+            example:
+              email: an.nguyen@company.vn
+              password: Matkhau@2026
+              fullName: Nguyễn Văn An
+      responses:
+        '201':
+          description: Account created; the response logs the user in.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthResponse'}
+              example: {accessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI3YzFlIn0.sig, tokenType: Bearer, expiresIn: 28800, user: {id: 7c1e2a4b-5d6f-4a8b-9c0d-1e2f3a4b5c6d, email: an.nguyen@company.vn, fullName: Nguyễn Văn An, role: EMPLOYEE, createdAt: '2026-11-16T02:00:00Z'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/auth/register, code: VALIDATION_FAILED, errors: [{field: password, message: size must be between 8 and 72}]}}}
+        '409':
+          description: '`EMAIL_ALREADY_EXISTS`: email already registered (case-insensitive).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {EmailAlreadyExists: {summary: EMAIL_ALREADY_EXISTS, value: {type: about:blank, title: Conflict, status: 409, detail: Email is already registered., instance: /api/v1/auth/register, code: EMAIL_ALREADY_EXISTS}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/auth/register, code: INTERNAL_ERROR}}}
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Log in and receive a JWT
+      x-roles: [PUBLIC]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: employee@spacebooking.local
+              password: Employee@12345
+      responses:
+        '200':
+          description: Logged in.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuthResponse'}
+              example: {accessToken: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMTExIn0.sig, tokenType: Bearer, expiresIn: 28800, user: {id: 11111111-1111-4111-8111-111111111111, email: employee@spacebooking.local, fullName: Trần Thị Bình, role: EMPLOYEE, createdAt: '2026-11-01T00:00:00Z'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/auth/login, code: VALIDATION_FAILED, errors: [{field: email, message: must be a well-formed email address}]}}}
+        '401':
+          description: '`INVALID_CREDENTIALS`: unknown email or wrong password.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InvalidCredentials: {summary: INVALID_CREDENTIALS, value: {type: about:blank, title: Unauthorized, status: 401, detail: Email or password is incorrect., instance: /api/v1/auth/login, code: INVALID_CREDENTIALS}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/auth/login, code: INTERNAL_ERROR}}}
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: Current user from the token
+      x-roles: [EMPLOYEE, MANAGER, ADMIN]
+      responses:
+        '200':
+          description: Current user.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/UserResponse'}
+              example: {id: 11111111-1111-4111-8111-111111111111, email: employee@spacebooking.local, fullName: Trần Thị Bình, role: EMPLOYEE, createdAt: '2026-11-01T00:00:00Z'}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/auth/me, code: UNAUTHENTICATED}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/auth/me, code: INTERNAL_ERROR}}}
+  /api/v1/rooms:
+    get:
+      tags: [Rooms]
+      operationId: searchRooms
+      summary: Search rooms (JPA Specification)
+      description: |
+        All filters are optional and combined with AND. `equipments` matches whole tokens and requires all of them.
+        `availableFrom`/`availableTo` must be given together with `availableTo > availableFrom` and keep only rooms with no blocking booking overlapping the range.
+        Sorted by name. `includeInactive=true` is ADMIN-only.
+      x-roles: [EMPLOYEE, MANAGER, ADMIN]
+      parameters:
+        - name: minCapacity
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+          example: 6
+        - name: equipments
+          in: query
+          description: Comma-separated tokens, e.g. `tv,whiteboard`.
+          style: form
+          explode: false
+          schema:
+            type: array
+            maxItems: 20
+            items:
+              $ref: '#/components/schemas/EquipmentToken'
+          example: [tv, whiteboard]
+        - name: availableFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+          example: '2026-11-17T09:00:00+07:00'
+        - name: availableTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+          example: '2026-11-17T10:00:00+07:00'
+        - name: includeInactive
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Matching rooms.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/RoomResponse'}}
+              example: [{id: aaaaaaaa-0000-4000-8000-000000000001, name: Phòng Sen, location: Tầng 3, capacity: 6, equipments: [tv, whiteboard], requiresApproval: false, active: true}]
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/rooms?availableFrom=2026-11-17T10:00:00%2B07:00&availableTo=2026-11-17T09:00:00%2B07:00, code: VALIDATION_FAILED, errors: [{field: availableTo, message: must be after availableFrom}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/rooms, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Only administrators can list inactive rooms., instance: /api/v1/rooms?includeInactive=true, code: ACCESS_DENIED}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/rooms, code: INTERNAL_ERROR}}}
+    post:
+      tags: [Rooms]
+      operationId: createRoom
+      summary: Create a room
+      x-roles: [ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoomRequest'
+            example:
+              name: Phòng Đào
+              location: Tầng 4
+              capacity: 8
+              equipments: [tv, video-conference]
+              requiresApproval: false
+      responses:
+        '201':
+          description: Room created.
+          headers:
+            Location:
+              schema: {type: string}
+              description: URL of the new room.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RoomResponse'}
+              example: {id: aaaaaaaa-0000-4000-8000-000000000006, name: Phòng Đào, location: Tầng 4, capacity: 8, equipments: [tv, video-conference], requiresApproval: false, active: true}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/rooms, code: VALIDATION_FAILED, errors: [{field: capacity, message: must be between 1 and 1000}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/rooms, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Your role is not allowed to perform this action., instance: /api/v1/rooms, code: ACCESS_DENIED}}}
+        '409':
+          description: '`ROOM_NAME_ALREADY_EXISTS`: another room has this name.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {RoomNameAlreadyExists: {summary: ROOM_NAME_ALREADY_EXISTS, value: {type: about:blank, title: Conflict, status: 409, detail: A room with this name already exists., instance: /api/v1/rooms, code: ROOM_NAME_ALREADY_EXISTS}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/rooms, code: INTERNAL_ERROR}}}
+  /api/v1/rooms/{roomId}:
+    parameters:
+      - $ref: '#/components/parameters/RoomId'
+    get:
+      tags: [Rooms]
+      operationId: getRoom
+      summary: Get one room
+      description: Inactive rooms are 404 for non-admins.
+      x-roles: [EMPLOYEE, MANAGER, ADMIN]
+      responses:
+        '200':
+          description: The room.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RoomResponse'}
+              example: {id: aaaaaaaa-0000-4000-8000-000000000003, name: Hội trường Bạch Đằng, location: Tầng 1, capacity: 40, equipments: [microphone, projector, speaker], requiresApproval: true, active: true}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/rooms/not-a-uuid, code: VALIDATION_FAILED, errors: [{field: roomId, message: must be a valid UUID}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: UNAUTHENTICATED}}}
+        '404':
+          description: '`ROOM_NOT_FOUND`: room does not exist, or is inactive for a non-admin.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {RoomNotFound: {summary: ROOM_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Room not found., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000009, code: ROOM_NOT_FOUND}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: INTERNAL_ERROR}}}
+    put:
+      tags: [Rooms]
+      operationId: updateRoom
+      summary: Replace a room's attributes
+      description: Setting `active=false` applies the same guard as DELETE.
+      x-roles: [ADMIN]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoomRequest'
+            example:
+              name: Phòng Sen
+              location: Tầng 3
+              capacity: 8
+              equipments: [tv, whiteboard]
+              requiresApproval: false
+              active: true
+      responses:
+        '200':
+          description: Room updated.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RoomResponse'}
+              example: {id: aaaaaaaa-0000-4000-8000-000000000001, name: Phòng Sen, location: Tầng 3, capacity: 8, equipments: [tv, whiteboard], requiresApproval: false, active: true}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: VALIDATION_FAILED, errors: [{field: 'equipments[0]', message: 'must match "^[a-z0-9-]{1,24}$"'}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Your role is not allowed to perform this action., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: ACCESS_DENIED}}}
+        '404':
+          description: '`ROOM_NOT_FOUND`: room does not exist, or is inactive for a non-admin.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {RoomNotFound: {summary: ROOM_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Room not found., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000009, code: ROOM_NOT_FOUND}}}
+        '409':
+          description: '`ROOM_NAME_ALREADY_EXISTS`: another room has this name. `ROOM_HAS_FUTURE_BOOKINGS`: room has blocking bookings ending in the future. `CONCURRENT_UPDATE`: a concurrent change won (optimistic version or lock timeout); reload and retry.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {RoomNameAlreadyExists: {summary: ROOM_NAME_ALREADY_EXISTS, value: {type: about:blank, title: Conflict, status: 409, detail: A room with this name already exists., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: ROOM_NAME_ALREADY_EXISTS}}, RoomHasFutureBookings: {summary: ROOM_HAS_FUTURE_BOOKINGS, value: {type: about:blank, title: Conflict, status: 409, detail: Room has upcoming bookings; cancel them first., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: ROOM_HAS_FUTURE_BOOKINGS}}, ConcurrentUpdate: {summary: CONCURRENT_UPDATE, value: {type: about:blank, title: Conflict, status: 409, detail: The room was changed concurrently; reload and retry., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: CONCURRENT_UPDATE}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: INTERNAL_ERROR}}}
+    delete:
+      tags: [Rooms]
+      operationId: deactivateRoom
+      summary: Soft-delete a room (is_active = false)
+      description: Idempotent; deactivating an inactive room returns 204.
+      x-roles: [ADMIN]
+      responses:
+        '204':
+          description: Room deactivated.
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/rooms/not-a-uuid, code: VALIDATION_FAILED, errors: [{field: roomId, message: must be a valid UUID}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Your role is not allowed to perform this action., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: ACCESS_DENIED}}}
+        '404':
+          description: '`ROOM_NOT_FOUND`: room does not exist, or is inactive for a non-admin.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {RoomNotFound: {summary: ROOM_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Room not found., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000009, code: ROOM_NOT_FOUND}}}
+        '409':
+          description: '`ROOM_HAS_FUTURE_BOOKINGS`: room has blocking bookings ending in the future. `CONCURRENT_UPDATE`: a concurrent change won (optimistic version or lock timeout); reload and retry.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {RoomHasFutureBookings: {summary: ROOM_HAS_FUTURE_BOOKINGS, value: {type: about:blank, title: Conflict, status: 409, detail: Room has upcoming bookings; cancel them first., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: ROOM_HAS_FUTURE_BOOKINGS}}, ConcurrentUpdate: {summary: CONCURRENT_UPDATE, value: {type: about:blank, title: Conflict, status: 409, detail: The room was changed concurrently; reload and retry., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: CONCURRENT_UPDATE}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/rooms/aaaaaaaa-0000-4000-8000-000000000001, code: INTERNAL_ERROR}}}
+  /api/v1/bookings:
+    post:
+      tags: [Bookings]
+      operationId: createBooking
+      summary: Create a booking
+      description: Status is decided by the caller's BookingPolicyStrategy (see domain.md).
+      x-roles: [EMPLOYEE, MANAGER]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingRequest'
+            example:
+              roomId: aaaaaaaa-0000-4000-8000-000000000001
+              title: Họp kế hoạch sprint
+              startTime: '2026-11-17T09:00:00+07:00'
+              endTime: '2026-11-17T10:00:00+07:00'
+      responses:
+        '201':
+          description: Booking created as PENDING or CONFIRMED.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BookingResponse'}
+              examples: {BookingConfirmed: {$ref: '#/components/examples/BookingConfirmed'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]). `START_IN_PAST`: startTime is before the current minute. `DURATION_EXCEEDED`: EMPLOYEE booking longer than 120 minutes.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings, code: VALIDATION_FAILED, errors: [{field: endTime, message: must be after startTime}]}}, StartInPast: {summary: START_IN_PAST, value: {type: about:blank, title: Bad Request, status: 400, detail: Start time is in the past., instance: /api/v1/bookings, code: START_IN_PAST}}, DurationExceeded: {summary: DURATION_EXCEEDED, value: {type: about:blank, title: Bad Request, status: 400, detail: Employees can book at most 120 minutes., instance: /api/v1/bookings, code: DURATION_EXCEEDED}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Administrators cannot create bookings., instance: /api/v1/bookings, code: ACCESS_DENIED}}}
+        '404':
+          description: '`ROOM_NOT_FOUND`: room does not exist, or is inactive for a non-admin.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {RoomNotFound: {summary: ROOM_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Room not found., instance: /api/v1/bookings, code: ROOM_NOT_FOUND}}}
+        '409':
+          description: '`BOOKING_CONFLICT`: slot overlaps a blocking booking, or lost the concurrent race.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {BookingConflict: {summary: BOOKING_CONFLICT, value: {type: about:blank, title: Conflict, status: 409, detail: The room is already booked in this time range., instance: /api/v1/bookings, code: BOOKING_CONFLICT}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings, code: INTERNAL_ERROR}}}
+  /api/v1/bookings/daily-schedule:
+    get:
+      tags: [Bookings]
+      operationId: getDailySchedule
+      summary: All active rooms with their blocking bookings for one day (cached)
+      description: The day is `[date 00:00, date+1 00:00)` in Asia/Ho_Chi_Minh. Bookings overlapping that range are included. Rooms sorted by name, bookings by start time.
+      x-roles: [EMPLOYEE, MANAGER, ADMIN]
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          example: '2026-11-17'
+      responses:
+        '200':
+          description: Schedule of the day.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DailyScheduleResponse'}
+              example: {date: '2026-11-17', rooms: [{room: {id: aaaaaaaa-0000-4000-8000-000000000001, name: Phòng Sen, location: Tầng 3, capacity: 6, equipments: [tv, whiteboard], requiresApproval: false, active: true}, bookings: [{id: bbbbbbbb-0000-4000-8000-000000000001, title: Họp kế hoạch sprint, startTime: '2026-11-17T02:00:00Z', endTime: '2026-11-17T03:00:00Z', status: CONFIRMED, user: {id: 11111111-1111-4111-8111-111111111111, fullName: Trần Thị Bình}}]}]}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings/daily-schedule?date=17-11-2026, code: VALIDATION_FAILED, errors: [{field: date, message: must be a date in format YYYY-MM-DD}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings/daily-schedule, code: UNAUTHENTICATED}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings/daily-schedule, code: INTERNAL_ERROR}}}
+  /api/v1/bookings/my-bookings:
+    get:
+      tags: [Bookings]
+      operationId: getMyBookings
+      summary: Bookings of the current user, newest start first
+      x-roles: [EMPLOYEE, MANAGER]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/BookingStatus'
+          example: CONFIRMED
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: One page of bookings.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BookingPage'}
+              examples: {MyBookingsPage: {$ref: '#/components/examples/MyBookingsPage'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings/my-bookings?size=500, code: VALIDATION_FAILED, errors: [{field: size, message: must be less than or equal to 100}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings/my-bookings, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Administrators have no bookings., instance: /api/v1/bookings/my-bookings, code: ACCESS_DENIED}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings/my-bookings, code: INTERNAL_ERROR}}}
+  /api/v1/bookings/pending:
+    get:
+      tags: [Bookings]
+      operationId: getPendingBookings
+      summary: Approval queue, earliest start first
+      x-roles: [MANAGER]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: One page of PENDING bookings.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BookingPage'}
+              examples: {PendingBookingsPage: {$ref: '#/components/examples/PendingBookingsPage'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings/pending?page=-1, code: VALIDATION_FAILED, errors: [{field: page, message: must be greater than or equal to 0}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings/pending, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Only managers can view the approval queue., instance: /api/v1/bookings/pending, code: ACCESS_DENIED}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings/pending, code: INTERNAL_ERROR}}}
+  /api/v1/bookings/{bookingId}/approve:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    patch:
+      tags: [Bookings]
+      operationId: approveBooking
+      summary: PENDING -> CONFIRMED
+      x-roles: [MANAGER]
+      responses:
+        '200':
+          description: Approved.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BookingResponse'}
+              examples: {BookingConfirmed: {$ref: '#/components/examples/BookingConfirmed'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings/not-a-uuid/approve, code: VALIDATION_FAILED, errors: [{field: bookingId, message: must be a valid UUID}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/approve, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Only managers can approve bookings., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/approve, code: ACCESS_DENIED}}}
+        '404':
+          description: '`BOOKING_NOT_FOUND`: booking does not exist.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {BookingNotFound: {summary: BOOKING_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Booking not found., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000009/approve, code: BOOKING_NOT_FOUND}}}
+        '409':
+          description: '`INVALID_STATE_TRANSITION`: action not allowed in the current booking status. `BOOKING_ALREADY_STARTED`: action only allowed before start_time. `CONCURRENT_UPDATE`: a concurrent change won (optimistic version or lock timeout); reload and retry.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InvalidStateTransition: {summary: INVALID_STATE_TRANSITION, value: {type: about:blank, title: Conflict, status: 409, detail: Cannot approve a booking in status CONFIRMED., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/approve, code: INVALID_STATE_TRANSITION}}, BookingAlreadyStarted: {summary: BOOKING_ALREADY_STARTED, value: {type: about:blank, title: Conflict, status: 409, detail: The booking has already started., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/approve, code: BOOKING_ALREADY_STARTED}}, ConcurrentUpdate: {summary: CONCURRENT_UPDATE, value: {type: about:blank, title: Conflict, status: 409, detail: The booking is being changed by another request; reload and retry., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/approve, code: CONCURRENT_UPDATE}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/approve, code: INTERNAL_ERROR}}}
+  /api/v1/bookings/{bookingId}/reject:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    patch:
+      tags: [Bookings]
+      operationId: rejectBooking
+      summary: PENDING -> CANCELLED with a reason
+      x-roles: [MANAGER]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectRequest'
+            example:
+              reason: Hội trường đã dành cho sự kiện toàn công ty
+      responses:
+        '200':
+          description: Rejected.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BookingResponse'}
+              examples: {BookingRejected: {$ref: '#/components/examples/BookingRejected'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/reject, code: VALIDATION_FAILED, errors: [{field: reason, message: must not be blank}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/reject, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Only managers can reject bookings., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/reject, code: ACCESS_DENIED}}}
+        '404':
+          description: '`BOOKING_NOT_FOUND`: booking does not exist.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {BookingNotFound: {summary: BOOKING_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Booking not found., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000009/reject, code: BOOKING_NOT_FOUND}}}
+        '409':
+          description: '`INVALID_STATE_TRANSITION`: action not allowed in the current booking status. `BOOKING_ALREADY_STARTED`: action only allowed before start_time. `CONCURRENT_UPDATE`: a concurrent change won (optimistic version or lock timeout); reload and retry.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InvalidStateTransition: {summary: INVALID_STATE_TRANSITION, value: {type: about:blank, title: Conflict, status: 409, detail: Cannot reject a booking in status CANCELLED., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/reject, code: INVALID_STATE_TRANSITION}}, BookingAlreadyStarted: {summary: BOOKING_ALREADY_STARTED, value: {type: about:blank, title: Conflict, status: 409, detail: The booking has already started., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/reject, code: BOOKING_ALREADY_STARTED}}, ConcurrentUpdate: {summary: CONCURRENT_UPDATE, value: {type: about:blank, title: Conflict, status: 409, detail: The booking is being changed by another request; reload and retry., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/reject, code: CONCURRENT_UPDATE}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/reject, code: INTERNAL_ERROR}}}
+  /api/v1/bookings/{bookingId}/check-in:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    patch:
+      tags: [Bookings]
+      operationId: checkInBooking
+      summary: CONFIRMED -> CHECKED_IN inside the check-in window
+      x-roles: [EMPLOYEE, MANAGER]
+      x-ownership: owner only
+      responses:
+        '200':
+          description: Checked in.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BookingResponse'}
+              examples: {BookingCheckedIn: {$ref: '#/components/examples/BookingCheckedIn'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings/not-a-uuid/check-in, code: VALIDATION_FAILED, errors: [{field: bookingId, message: must be a valid UUID}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/check-in, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Only the owner of this booking can do this., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/check-in, code: ACCESS_DENIED}}}
+        '404':
+          description: '`BOOKING_NOT_FOUND`: booking does not exist.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {BookingNotFound: {summary: BOOKING_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Booking not found., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000009/check-in, code: BOOKING_NOT_FOUND}}}
+        '409':
+          description: '`INVALID_STATE_TRANSITION`: action not allowed in the current booking status. `OUTSIDE_CHECKIN_WINDOW`: check-in only from start-15m to start+15m. `CONCURRENT_UPDATE`: a concurrent change won (optimistic version or lock timeout); reload and retry.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InvalidStateTransition: {summary: INVALID_STATE_TRANSITION, value: {type: about:blank, title: Conflict, status: 409, detail: Cannot check in a booking in status PENDING., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/check-in, code: INVALID_STATE_TRANSITION}}, OutsideCheckinWindow: {summary: OUTSIDE_CHECKIN_WINDOW, value: {type: about:blank, title: Conflict, status: 409, detail: Check-in is allowed from 15 minutes before to 15 minutes after the start time., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/check-in, code: OUTSIDE_CHECKIN_WINDOW}}, ConcurrentUpdate: {summary: CONCURRENT_UPDATE, value: {type: about:blank, title: Conflict, status: 409, detail: The booking is being changed by another request; reload and retry., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/check-in, code: CONCURRENT_UPDATE}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/check-in, code: INTERNAL_ERROR}}}
+  /api/v1/bookings/{bookingId}/checkout:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    patch:
+      tags: [Bookings]
+      operationId: checkOutBooking
+      summary: CHECKED_IN -> COMPLETED; early checkout shortens end_time
+      x-roles: [EMPLOYEE, MANAGER]
+      x-ownership: owner only
+      responses:
+        '200':
+          description: Checked out.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BookingResponse'}
+              examples: {BookingCompleted: {$ref: '#/components/examples/BookingCompleted'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings/not-a-uuid/checkout, code: VALIDATION_FAILED, errors: [{field: bookingId, message: must be a valid UUID}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/checkout, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Only the owner of this booking can do this., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/checkout, code: ACCESS_DENIED}}}
+        '404':
+          description: '`BOOKING_NOT_FOUND`: booking does not exist.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {BookingNotFound: {summary: BOOKING_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Booking not found., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000009/checkout, code: BOOKING_NOT_FOUND}}}
+        '409':
+          description: '`INVALID_STATE_TRANSITION`: action not allowed in the current booking status. `CONCURRENT_UPDATE`: a concurrent change won (optimistic version or lock timeout); reload and retry.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InvalidStateTransition: {summary: INVALID_STATE_TRANSITION, value: {type: about:blank, title: Conflict, status: 409, detail: Cannot check out a booking in status CONFIRMED., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/checkout, code: INVALID_STATE_TRANSITION}}, ConcurrentUpdate: {summary: CONCURRENT_UPDATE, value: {type: about:blank, title: Conflict, status: 409, detail: The booking is being changed by another request; reload and retry., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/checkout, code: CONCURRENT_UPDATE}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/checkout, code: INTERNAL_ERROR}}}
+  /api/v1/bookings/{bookingId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    patch:
+      tags: [Bookings]
+      operationId: cancelBooking
+      summary: PENDING or CONFIRMED -> CANCELLED before start
+      x-roles: [EMPLOYEE, MANAGER]
+      x-ownership: owner only
+      responses:
+        '200':
+          description: Cancelled.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/BookingResponse'}
+              examples: {BookingCancelled: {$ref: '#/components/examples/BookingCancelled'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings/not-a-uuid/cancel, code: VALIDATION_FAILED, errors: [{field: bookingId, message: must be a valid UUID}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/cancel, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Only the owner of this booking can do this., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/cancel, code: ACCESS_DENIED}}}
+        '404':
+          description: '`BOOKING_NOT_FOUND`: booking does not exist.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {BookingNotFound: {summary: BOOKING_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Booking not found., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000009/cancel, code: BOOKING_NOT_FOUND}}}
+        '409':
+          description: '`INVALID_STATE_TRANSITION`: action not allowed in the current booking status. `BOOKING_ALREADY_STARTED`: action only allowed before start_time. `CONCURRENT_UPDATE`: a concurrent change won (optimistic version or lock timeout); reload and retry.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InvalidStateTransition: {summary: INVALID_STATE_TRANSITION, value: {type: about:blank, title: Conflict, status: 409, detail: Cannot cancel a booking in status CHECKED_IN., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/cancel, code: INVALID_STATE_TRANSITION}}, BookingAlreadyStarted: {summary: BOOKING_ALREADY_STARTED, value: {type: about:blank, title: Conflict, status: 409, detail: The booking has already started., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/cancel, code: BOOKING_ALREADY_STARTED}}, ConcurrentUpdate: {summary: CONCURRENT_UPDATE, value: {type: about:blank, title: Conflict, status: 409, detail: The booking is being changed by another request; reload and retry., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/cancel, code: CONCURRENT_UPDATE}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/cancel, code: INTERNAL_ERROR}}}
+  /api/v1/bookings/{bookingId}/logs:
+    parameters:
+      - $ref: '#/components/parameters/BookingId'
+    get:
+      tags: [Audit]
+      operationId: getBookingLogs
+      summary: Audit trail of one booking, oldest first
+      x-roles: [EMPLOYEE, MANAGER, ADMIN]
+      x-ownership: EMPLOYEE only for own bookings; MANAGER and ADMIN for any booking
+      responses:
+        '200':
+          description: Audit entries.
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: '#/components/schemas/AuditLogResponse'}}
+              examples: {BookingLogs: {$ref: '#/components/examples/BookingLogs'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/bookings/not-a-uuid/logs, code: VALIDATION_FAILED, errors: [{field: bookingId, message: must be a valid UUID}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/logs, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: You can only view logs of your own bookings., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/logs, code: ACCESS_DENIED}}}
+        '404':
+          description: '`BOOKING_NOT_FOUND`: booking does not exist.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {BookingNotFound: {summary: BOOKING_NOT_FOUND, value: {type: about:blank, title: Not Found, status: 404, detail: Booking not found., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000009/logs, code: BOOKING_NOT_FOUND}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/bookings/bbbbbbbb-0000-4000-8000-000000000001/logs, code: INTERNAL_ERROR}}}
+  /api/v1/audit-logs:
+    get:
+      tags: [Audit]
+      operationId: searchAuditLogs
+      summary: Global audit log, newest first
+      description: '`from`/`to` are inclusive dates in Asia/Ho_Chi_Minh; `from` must not be after `to`.'
+      x-roles: [ADMIN]
+      parameters:
+        - name: bookingId
+          in: query
+          schema:
+            type: string
+            format: uuid
+          example: bbbbbbbb-0000-4000-8000-000000000002
+        - name: action
+          in: query
+          schema:
+            $ref: '#/components/schemas/AuditAction'
+          example: APPROVED
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+          example: '2026-11-01'
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+          example: '2026-11-30'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: One page of audit entries.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AuditLogPage'}
+              examples: {AuditLogPage: {$ref: '#/components/examples/AuditLogPage'}}
+        '400':
+          description: '`VALIDATION_FAILED`: request shape or field validation failed (see errors[]).'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {ValidationFailed: {summary: VALIDATION_FAILED, value: {type: about:blank, title: Bad Request, status: 400, detail: Request validation failed., instance: /api/v1/audit-logs?from=2026-11-30&to=2026-11-01, code: VALIDATION_FAILED, errors: [{field: from, message: must not be after to}]}}}
+        '401':
+          description: '`UNAUTHENTICATED`: missing, malformed, tampered or expired token.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {Unauthenticated: {summary: UNAUTHENTICATED, value: {type: about:blank, title: Unauthorized, status: 401, detail: Authentication is required., instance: /api/v1/audit-logs, code: UNAUTHENTICATED}}}
+        '403':
+          description: '`ACCESS_DENIED`: role not allowed, or caller is not the owner.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {AccessDenied: {summary: ACCESS_DENIED, value: {type: about:blank, title: Forbidden, status: 403, detail: Only administrators can read the audit log., instance: /api/v1/audit-logs, code: ACCESS_DENIED}}}
+        '500':
+          description: '`INTERNAL_ERROR`: unexpected server error; no stack trace is exposed.'
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/ProblemDetail'}
+              examples: {InternalError: {summary: INTERNAL_ERROR, value: {type: about:blank, title: Internal Server Error, status: 500, detail: An unexpected error occurred., instance: /api/v1/audit-logs, code: INTERNAL_ERROR}}}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: HS256 JWT. Claims `sub` (user id), `email`, `role`, `exp`.
+  parameters:
+    RoomId:
+      name: roomId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: aaaaaaaa-0000-4000-8000-000000000001
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: bbbbbbbb-0000-4000-8000-000000000001
+    Page:
+      name: page
+      in: query
+      description: Zero-based page index.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+  examples:
+    BookingConfirmed:
+      value:
+        id: bbbbbbbb-0000-4000-8000-000000000001
+        room:
+          id: aaaaaaaa-0000-4000-8000-000000000001
+          name: Phòng Sen
+          location: Tầng 3
+        user:
+          id: 11111111-1111-4111-8111-111111111111
+          fullName: Trần Thị Bình
+        title: Họp kế hoạch sprint
+        startTime: '2026-11-17T02:00:00Z'
+        endTime: '2026-11-17T03:00:00Z'
+        status: CONFIRMED
+        rejectionReason: null
+        createdAt: '2026-11-16T03:00:00Z'
+    BookingRejected:
+      value:
+        id: bbbbbbbb-0000-4000-8000-000000000002
+        room:
+          id: aaaaaaaa-0000-4000-8000-000000000003
+          name: Hội trường Bạch Đằng
+          location: Tầng 1
+        user:
+          id: 11111111-1111-4111-8111-111111111111
+          fullName: Trần Thị Bình
+        title: Đào tạo nhân viên mới
+        startTime: '2026-11-18T07:00:00Z'
+        endTime: '2026-11-18T09:00:00Z'
+        status: CANCELLED
+        rejectionReason: Hội trường đã dành cho sự kiện toàn công ty
+        createdAt: '2026-11-16T03:05:00Z'
+    BookingCheckedIn:
+      value:
+        id: bbbbbbbb-0000-4000-8000-000000000001
+        room:
+          id: aaaaaaaa-0000-4000-8000-000000000001
+          name: Phòng Sen
+          location: Tầng 3
+        user:
+          id: 11111111-1111-4111-8111-111111111111
+          fullName: Trần Thị Bình
+        title: Họp kế hoạch sprint
+        startTime: '2026-11-17T02:00:00Z'
+        endTime: '2026-11-17T03:00:00Z'
+        status: CHECKED_IN
+        rejectionReason: null
+        createdAt: '2026-11-16T03:00:00Z'
+    BookingCompleted:
+      value:
+        id: bbbbbbbb-0000-4000-8000-000000000001
+        room:
+          id: aaaaaaaa-0000-4000-8000-000000000001
+          name: Phòng Sen
+          location: Tầng 3
+        user:
+          id: 11111111-1111-4111-8111-111111111111
+          fullName: Trần Thị Bình
+        title: Họp kế hoạch sprint
+        startTime: '2026-11-17T02:00:00Z'
+        endTime: '2026-11-17T02:41:00Z'
+        status: COMPLETED
+        rejectionReason: null
+        createdAt: '2026-11-16T03:00:00Z'
+    BookingCancelled:
+      value:
+        id: bbbbbbbb-0000-4000-8000-000000000001
+        room:
+          id: aaaaaaaa-0000-4000-8000-000000000001
+          name: Phòng Sen
+          location: Tầng 3
+        user:
+          id: 11111111-1111-4111-8111-111111111111
+          fullName: Trần Thị Bình
+        title: Họp kế hoạch sprint
+        startTime: '2026-11-17T02:00:00Z'
+        endTime: '2026-11-17T03:00:00Z'
+        status: CANCELLED
+        rejectionReason: null
+        createdAt: '2026-11-16T03:00:00Z'
+    MyBookingsPage:
+      value:
+        content:
+          - id: bbbbbbbb-0000-4000-8000-000000000001
+            room:
+              id: aaaaaaaa-0000-4000-8000-000000000001
+              name: Phòng Sen
+              location: Tầng 3
+            user:
+              id: 11111111-1111-4111-8111-111111111111
+              fullName: Trần Thị Bình
+            title: Họp kế hoạch sprint
+            startTime: '2026-11-17T02:00:00Z'
+            endTime: '2026-11-17T03:00:00Z'
+            status: CONFIRMED
+            rejectionReason: null
+            createdAt: '2026-11-16T03:00:00Z'
+        page: 0
+        size: 20
+        totalElements: 1
+        totalPages: 1
+    PendingBookingsPage:
+      value:
+        content:
+          - id: bbbbbbbb-0000-4000-8000-000000000002
+            room:
+              id: aaaaaaaa-0000-4000-8000-000000000003
+              name: Hội trường Bạch Đằng
+              location: Tầng 1
+            user:
+              id: 11111111-1111-4111-8111-111111111111
+              fullName: Trần Thị Bình
+            title: Đào tạo nhân viên mới
+            startTime: '2026-11-18T07:00:00Z'
+            endTime: '2026-11-18T09:00:00Z'
+            status: PENDING
+            rejectionReason: null
+            createdAt: '2026-11-16T03:05:00Z'
+        page: 0
+        size: 20
+        totalElements: 1
+        totalPages: 1
+    AuditLogPage:
+      value:
+        content:
+          - id: cccccccc-0000-4000-8000-000000000002
+            bookingId: bbbbbbbb-0000-4000-8000-000000000002
+            action: APPROVED
+            performedBy: manager@spacebooking.local
+            details: '{"from":"PENDING","to":"CONFIRMED"}'
+            createdAt: '2026-11-16T04:00:00Z'
+        page: 0
+        size: 20
+        totalElements: 1
+        totalPages: 1
+    BookingLogs:
+      value:
+        - id: cccccccc-0000-4000-8000-000000000001
+          bookingId: bbbbbbbb-0000-4000-8000-000000000002
+          action: CREATED
+          performedBy: employee@spacebooking.local
+          details: '{"from":null,"to":"PENDING"}'
+          createdAt: '2026-11-16T03:05:00Z'
+        - id: cccccccc-0000-4000-8000-000000000002
+          bookingId: bbbbbbbb-0000-4000-8000-000000000002
+          action: APPROVED
+          performedBy: manager@spacebooking.local
+          details: '{"from":"PENDING","to":"CONFIRMED"}'
+          createdAt: '2026-11-16T04:00:00Z'
+  schemas:
+    Role:
+      type: string
+      enum: [EMPLOYEE, MANAGER, ADMIN]
+    BookingStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, CHECKED_IN, COMPLETED, CANCELLED, NO_SHOW]
+    AuditAction:
+      type: string
+      enum: [CREATED, APPROVED, REJECTED, CANCELLED, EXPIRED, CHECKED_IN, CHECKED_OUT, COMPLETED, NO_SHOW]
+    ErrorCode:
+      type: string
+      description: |
+        Stable error-code catalog.
+
+        | Code | HTTP | Meaning |
+        |---|---|---|
+        | VALIDATION_FAILED | 400 | request shape or field validation failed (see errors[]) |
+        | START_IN_PAST | 400 | startTime is before the current minute |
+        | DURATION_EXCEEDED | 400 | EMPLOYEE booking longer than 120 minutes |
+        | UNAUTHENTICATED | 401 | missing, malformed, tampered or expired token |
+        | INVALID_CREDENTIALS | 401 | unknown email or wrong password |
+        | ACCESS_DENIED | 403 | role not allowed, or caller is not the owner |
+        | ROOM_NOT_FOUND | 404 | room does not exist, or is inactive for a non-admin |
+        | BOOKING_NOT_FOUND | 404 | booking does not exist |
+        | EMAIL_ALREADY_EXISTS | 409 | email already registered (case-insensitive) |
+        | ROOM_NAME_ALREADY_EXISTS | 409 | another room has this name |
+        | ROOM_HAS_FUTURE_BOOKINGS | 409 | room has blocking bookings ending in the future |
+        | CONCURRENT_UPDATE | 409 | a concurrent change won (optimistic version or lock timeout); reload and retry |
+        | BOOKING_CONFLICT | 409 | slot overlaps a blocking booking, or lost the concurrent race |
+        | INVALID_STATE_TRANSITION | 409 | action not allowed in the current booking status |
+        | BOOKING_ALREADY_STARTED | 409 | action only allowed before start_time |
+        | OUTSIDE_CHECKIN_WINDOW | 409 | check-in only from start-15m to start+15m |
+        | INTERNAL_ERROR | 500 | unexpected server error; no stack trace is exposed |
+        | REQUEST_NOT_SUPPORTED | 404/405/415 | unknown route, wrong method or unsupported media type (framework level, not declared per operation) |
+      enum: [VALIDATION_FAILED, START_IN_PAST, DURATION_EXCEEDED, UNAUTHENTICATED, INVALID_CREDENTIALS, ACCESS_DENIED, ROOM_NOT_FOUND, BOOKING_NOT_FOUND, EMAIL_ALREADY_EXISTS, ROOM_NAME_ALREADY_EXISTS, ROOM_HAS_FUTURE_BOOKINGS, CONCURRENT_UPDATE, BOOKING_CONFLICT, INVALID_STATE_TRANSITION, BOOKING_ALREADY_STARTED, OUTSIDE_CHECKIN_WINDOW, INTERNAL_ERROR, REQUEST_NOT_SUPPORTED]
+    EquipmentToken:
+      type: string
+      pattern: ^[a-z0-9-]{1,24}$
+      example: whiteboard
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password, fullName]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Stored lower-cased.
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+        fullName:
+          type: string
+          minLength: 1
+          maxLength: 100
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          minLength: 1
+          maxLength: 72
+    AuthResponse:
+      type: object
+      required: [accessToken, tokenType, expiresIn, user]
+      properties:
+        accessToken:
+          type: string
+        tokenType:
+          type: string
+          const: Bearer
+        expiresIn:
+          type: integer
+          description: Seconds until expiry.
+        user:
+          $ref: '#/components/schemas/UserResponse'
+    UserResponse:
+      type: object
+      required: [id, email, fullName, role, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        fullName:
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+        createdAt:
+          type: string
+          format: date-time
+    UserSummary:
+      type: object
+      description: Public view of a user; never includes email.
+      required: [id, fullName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+    RoomRequest:
+      type: object
+      additionalProperties: false
+      required: [name, location, capacity, equipments, requiresApproval]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        location:
+          type: string
+          minLength: 1
+          maxLength: 255
+        capacity:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        equipments:
+          type: array
+          maxItems: 20
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/EquipmentToken'
+        requiresApproval:
+          type: boolean
+        active:
+          type: boolean
+          description: 'Ignored on create (rooms start active). On update: omitted = unchanged, false deactivates (same guard as DELETE), true reactivates.'
+    RoomResponse:
+      type: object
+      required: [id, name, location, capacity, equipments, requiresApproval, active]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        location:
+          type: string
+        capacity:
+          type: integer
+        equipments:
+          type: array
+          description: Sorted ascending.
+          items:
+            $ref: '#/components/schemas/EquipmentToken'
+        requiresApproval:
+          type: boolean
+        active:
+          type: boolean
+    RoomSummary:
+      type: object
+      required: [id, name, location]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        location:
+          type: string
+    BookingRequest:
+      type: object
+      additionalProperties: false
+      required: [roomId, title, startTime, endTime]
+      properties:
+        roomId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        startTime:
+          type: string
+          format: date-time
+          description: Whole minute; not before the current minute.
+        endTime:
+          type: string
+          format: date-time
+          description: Whole minute; after startTime.
+    RejectRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Blank after trim is invalid.
+    BookingResponse:
+      type: object
+      required: [id, room, user, title, startTime, endTime, status, rejectionReason, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        room:
+          $ref: '#/components/schemas/RoomSummary'
+        user:
+          $ref: '#/components/schemas/UserSummary'
+        title:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/BookingStatus'
+        rejectionReason:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+    ScheduleBookingResponse:
+      type: object
+      required: [id, title, startTime, endTime, status, user]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [PENDING, CONFIRMED, CHECKED_IN]
+        user:
+          $ref: '#/components/schemas/UserSummary'
+    RoomScheduleResponse:
+      type: object
+      required: [room, bookings]
+      properties:
+        room:
+          $ref: '#/components/schemas/RoomResponse'
+        bookings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduleBookingResponse'
+    DailyScheduleResponse:
+      type: object
+      required: [date, rooms]
+      properties:
+        date:
+          type: string
+          format: date
+        rooms:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoomScheduleResponse'
+    AuditLogResponse:
+      type: object
+      required: [id, bookingId, action, performedBy, details, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        bookingId:
+          type: string
+          format: uuid
+        action:
+          $ref: '#/components/schemas/AuditAction'
+        performedBy:
+          type: string
+          description: Actor email, or SYSTEM_SCHEDULER.
+        details:
+          type: string
+          description: 'JSON text: {"from","to"} plus "reason" or "endTime" when relevant.'
+        createdAt:
+          type: string
+          format: date-time
+    PageMetadata:
+      type: object
+      required: [page, size, totalElements, totalPages]
+      properties:
+        page:
+          type: integer
+          minimum: 0
+        size:
+          type: integer
+          minimum: 1
+        totalElements:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    BookingPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMetadata'
+        - type: object
+          required: [content]
+          properties:
+            content:
+              type: array
+              items: {$ref: '#/components/schemas/BookingResponse'}
+    AuditLogPage:
+      allOf:
+        - $ref: '#/components/schemas/PageMetadata'
+        - type: object
+          required: [content]
+          properties:
+            content:
+              type: array
+              items: {$ref: '#/components/schemas/AuditLogResponse'}
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+    ProblemDetail:
+      type: object
+      description: RFC 7807 problem with a stable `code`.
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          default: about:blank
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        errors:
+          type: array
+          description: Present only for VALIDATION_FAILED.
+          items:
+            $ref: '#/components/schemas/FieldError'

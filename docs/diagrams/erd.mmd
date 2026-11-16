@@ -1,0 +1,43 @@
+%% Generated from docs/contract/schema.sql
+erDiagram
+    users ||--o{ bookings : "makes"
+    rooms ||--o{ bookings : "is booked by"
+    bookings ||--o{ audit_logs : "is traced by"
+
+    users {
+        UUID id PK
+        VARCHAR email UK "lower-case"
+        VARCHAR password_hash "BCrypt"
+        VARCHAR full_name
+        VARCHAR role "EMPLOYEE | MANAGER | ADMIN"
+        TIMESTAMP created_at "UTC"
+    }
+    rooms {
+        UUID id PK
+        VARCHAR name UK
+        VARCHAR location
+        INT capacity "1..1000"
+        VARCHAR equipments "sorted comma-joined tokens"
+        BOOLEAN requires_approval
+        BOOLEAN is_active
+        BIGINT version "optimistic lock"
+    }
+    bookings {
+        UUID id PK
+        UUID room_id FK
+        UUID user_id FK
+        VARCHAR title
+        TIMESTAMP start_time "UTC, whole minute"
+        TIMESTAMP end_time "UTC, > start_time"
+        VARCHAR status "PENDING | CONFIRMED | CHECKED_IN | COMPLETED | CANCELLED | NO_SHOW"
+        VARCHAR rejection_reason "only when CANCELLED"
+        TIMESTAMP created_at "UTC"
+    }
+    audit_logs {
+        UUID id PK
+        UUID booking_id FK
+        VARCHAR action
+        VARCHAR performed_by "email or SYSTEM_SCHEDULER"
+        TEXT details "JSON text"
+        TIMESTAMP created_at "UTC"
+    }

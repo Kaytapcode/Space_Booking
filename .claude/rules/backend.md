@@ -1,0 +1,22 @@
+---
+paths:
+  - "backend/**"
+---
+# Backend rules
+- Package by feature: `com.spacebooking.<feature>.{api,service,domain,infra}`.
+- DTOs are `record`s that mirror OpenAPI schemas 1:1 (same name, fields, required, enums).
+- Entities: `@Getter` and a protected no-arg constructor. Never `@Data` or `@Setter` on entities.
+- Constructor injection only. No field `@Autowired`.
+- `Clock` is an injected bean. Never call `now()` without it.
+- `@Transactional` on service methods only. Controllers stay thin: validate, delegate, map.
+- One `@RestControllerAdvice` maps every error to ProblemDetail with a stable `code`: 400 validation with `errors[]`, 401, 403, 404, 409 including optimistic-lock failures.
+- Security-chain 401/403 also return ProblemDetail (custom entry point and access-denied handler).
+- Error codes, roles and statuses come only from `docs/contract/openapi.yaml`.
+- Banned class names: `*Helper`, `*Manager`, `*Util`, `*Processor`.
+- No interface with a single implementation, except Strategy and State.
+- Comments explain why, never what.
+- Audit events are published and handled synchronously, inside the transaction of the state change.
+- Booking creation, in one transaction: lock the room with `OPTIMISTIC_FORCE_INCREMENT`, run the overlap check, insert.
+- `ObjectOptimisticLockingFailureException` and the `bookings_no_overlap` constraint violation map to 409 `BOOKING_CONFLICT`.
+- Schema changes only via Flyway. `V1__init.sql` equals `docs/contract/schema.sql`. `ddl-auto=validate`.
+- Secrets only from environment variables. No secret literals in `application*.yml` outside the dev/e2e profiles.

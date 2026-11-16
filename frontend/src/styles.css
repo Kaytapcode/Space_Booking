@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+/* Tokens mirror docs/design/DESIGN.md. Defaults are reset so nothing outside the design system compiles. */
+@theme {
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --color-primary-50: #f0fdfa;
+  --color-primary-700: #0f766e;
+  --color-primary-800: #115e59;
+
+  --color-n-0: #ffffff;
+  --color-n-50: #f9fafb;
+  --color-n-100: #f3f4f6;
+  --color-n-200: #e5e7eb;
+  --color-n-300: #d1d5db;
+  --color-n-500: #6b7280;
+  --color-n-600: #4b5563;
+  --color-n-900: #111827;
+
+  --color-danger-50: #fee2e2;
+  --color-danger-700: #b91c1c;
+
+  --color-pending-bg: #fef3c7;
+  --color-pending-text: #78350f;
+  --color-pending-dot: #b45309;
+  --color-confirmed-bg: #dbeafe;
+  --color-confirmed-text: #1e3a8a;
+  --color-confirmed-dot: #1d4ed8;
+  --color-checkedin-bg: #dcfce7;
+  --color-checkedin-text: #14532d;
+  --color-checkedin-dot: #15803d;
+  --color-completed-bg: #e2e8f0;
+  --color-completed-text: #1e293b;
+  --color-completed-dot: #475569;
+  --color-gray-status-bg: #f3f4f6;
+  --color-gray-status-text: #4b5563;
+  --color-gray-status-dot: #6b7280;
+
+  --font-sans: Inter, system-ui, "Segoe UI", sans-serif;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-body: 14px;
+  --text-body--line-height: 20px;
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 24px;
+  --text-h3: 18px;
+  --text-h3--line-height: 28px;
+  --text-h2: 20px;
+  --text-h2--line-height: 28px;
+  --text-h1: 24px;
+  --text-h1--line-height: 32px;
+
+  --radius-*: initial;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  --shadow-*: initial;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.06);
+
+  --ease-*: initial;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+@layer base {
+  html {
+    @apply bg-n-50 font-sans text-body-lg text-n-900 antialiased lg:text-body;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-primary-700);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition: none !important;
+      animation: none !important;
+    }
+  }
+}
+
+/* Shared control styles built only from DESIGN.md tokens: controls 44px mobile / 36px desktop, inputs 16px. */
+@layer components {
+  .input {
+    @apply min-h-11 w-full rounded-md border border-n-300 bg-n-0 px-3 text-body-lg text-n-900 lg:min-h-9;
+  }
+  .input[aria-invalid='true'] {
+    @apply border-danger-700;
+  }
+  textarea.input {
+    @apply py-2;
+  }
+  .btn {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-transparent px-4 font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 lg:min-h-9;
+  }
+  .btn-primary {
+    @apply bg-primary-700 text-n-0 hover:bg-primary-800;
+  }
+  .btn-secondary {
+    @apply border-n-300 bg-n-0 text-n-900 hover:bg-n-100;
+  }
+  .btn-danger {
+    @apply bg-danger-700 text-n-0 hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply text-primary-700 hover:bg-primary-50;
+  }
+  .panel {
+    @apply rounded-lg border border-n-200 bg-n-0;
+  }
+  .th {
+    @apply px-3 py-2 text-left font-medium text-n-600;
+  }
+  .td {
+    @apply px-3 py-2 align-middle;
+  }
+}

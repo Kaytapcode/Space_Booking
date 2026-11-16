@@ -1,0 +1,2 @@
+# Runs inside Linux containers and CI; CRLF breaks the shebang.
+backend/mvnw text eol=lf

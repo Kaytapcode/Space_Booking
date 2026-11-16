@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+node_modules/
+target/
+dist/
+.angular/
+coverage/
+test-results/
+playwright-report/
+.idea/
+.vscode/
+*.log
+.playwright-mcp/

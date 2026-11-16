@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: spacebooking
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/spacebooking}
+    username: ${DB_USER:}
+    password: ${DB_PASSWORD:}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    # No hibernate.jdbc.time_zone: entities hold LocalDateTime already in UTC; that setting would shift them by the JVM zone.
+  flyway:
+    enabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  cache:
+    type: caffeine
+    cache-names: dailySchedule
+    caffeine:
+      spec: maximumSize=400,expireAfterWrite=60s
+  web:
+    locale: en
+    locale-resolver: fixed
+
+springdoc:
+  api-docs:
+    # Off by default so prod does not publish the spec; dev and e2e turn it on.
+    enabled: ${API_DOCS_ENABLED:false}
+    # The contract is OpenAPI 3.1 (`type: [string, 'null']`).
+    version: openapi_3_1
+  # Controllers return JSON only; without this springdoc documents every response as */*.
+  default-produces-media-type: application/json
+
+app:
+  jwt:
+    # Required (>= 32 bytes) in every profile except dev/e2e; JwtService refuses to start otherwise.
+    secret: ${JWT_SECRET:}
+    ttl: ${JWT_TTL:8h}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+  scheduler:
+    enabled: ${SCHEDULER_ENABLED:true}
+  seed:
+    enabled: ${SEED_ENABLED:false}
+    admin-password: ${SEED_ADMIN_PASSWORD:}
+    manager-password: ${SEED_MANAGER_PASSWORD:}
+    employee-password: ${SEED_EMPLOYEE_PASSWORD:}
