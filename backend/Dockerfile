@@ -3,6 +3,7 @@ WORKDIR /app
 # Dependencies first so this layer is cached until pom.xml changes.
 COPY .mvn .mvn
 COPY mvnw pom.xml ./
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw
 RUN ./mvnw -q dependency:go-offline
 COPY src src
 RUN ./mvnw -q -DskipTests package && mv target/spacebooking-*.jar app.jar
