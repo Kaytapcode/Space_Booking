@@ -131,7 +131,7 @@ flowchart TB
     subgraph INFRA[Tầng infra]
         UR[UserRepository]
         RR[RoomRepository]
-        BR[BookingRepository<br/>@EntityGraph, @Lock]
+        BR["BookingRepository<br/>@EntityGraph, @Lock"]
         AR[AuditLogRepository]
     end
 
@@ -390,7 +390,7 @@ sequenceDiagram
     API->>AS: kiểm tra BCrypt
     AS-->>FE: 200 { token (JWT HS256), user }
     FE->>FE: lưu token vào localStorage (sb.token)
-    FE->>API: GET /api/v1/... Authorization: Bearer <token>
+    FE->>API: GET /api/v1/... Authorization: Bearer #lt;token#gt;
     API->>API: JwtAuthenticationFilter xác thực chữ ký, exp, role
     alt token thiếu, sai hoặc hết hạn
         API-->>FE: 401 → xóa phiên, về /login
@@ -465,13 +465,13 @@ flowchart TB
     end
 
     subgraph features
-        L[/login, /register/]
-        D[/ Dashboard<br/>timeline hoặc thẻ/]
-        BF[/bookings/new<br/>EMPLOYEE, MANAGER/]
-        MB[/my-bookings<br/>EMPLOYEE, MANAGER/]
-        AP[/approvals<br/>MANAGER/]
-        AR[/admin/rooms<br/>ADMIN/]
-        AA[/admin/audit<br/>ADMIN/]
+        L["/login, /register"]
+        D["/ Dashboard<br/>timeline hoặc thẻ"]
+        BF["/bookings/new<br/>EMPLOYEE, MANAGER"]
+        MB["/my-bookings<br/>EMPLOYEE, MANAGER"]
+        AP["/approvals<br/>MANAGER"]
+        AR["/admin/rooms<br/>ADMIN"]
+        AA["/admin/audit<br/>ADMIN"]
     end
 
     AG --> D & BF & MB & AP & AR & AA
